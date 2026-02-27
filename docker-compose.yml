@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: gobase_db
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: gobase
+    ports:
+      - "5432:5432"
+    # O uso do tmpfs garante que os dados existam apenas na memória RAM.
+    # Ao derrubar o container (Ctrl+C e stop), os dados desaparecem para sempre.
+    tmpfs:
+      - /var/lib/postgresql/data
