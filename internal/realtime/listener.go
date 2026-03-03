@@ -19,17 +19,23 @@ type PgEvent struct {
 }
 
 // StartListener connects directly to PG and issues LISTEN gobase_events
-func StartListener(pool *pgxpool.Pool, hub *Hub) {
+func StartListener(ctx context.Context, pool *pgxpool.Pool, hub *Hub) {
 	go func() {
 		for {
-			listenBlocks(pool, hub)
-			log.Println("Realtime listener disconnected. Retrying in 5 seconds...")
-			time.Sleep(5 * time.Second)
+			select {
+			case <-ctx.Done():
+				log.Println("Realtime listener shutting down...")
+				return
+			default:
+				listenBlocks(ctx, pool, hub)
+				log.Println("Realtime listener disconnected. Retrying in 5 seconds...")
+				time.Sleep(5 * time.Second)
+			}
 		}
 	}()
 }
 
-func listenBlocks(pool *pgxpool.Pool, hub *Hub) {
+func listenBlocks(ctx context.Context, pool *pgxpool.Pool, hub *Hub) {
 	conn, err := pool.Acquire(context.Background())
 	if err != nil {
 		log.Printf("Failed to acquire connection for LISTEN: %v\n", err)
@@ -38,7 +44,7 @@ func listenBlocks(pool *pgxpool.Pool, hub *Hub) {
 	defer conn.Release()
 
 	// Issue the LISTEN command on the specific channel
-	_, err = conn.Exec(context.Background(), "LISTEN gobase_events")
+	_, err = conn.Exec(ctx, "LISTEN gobase_events")
 	if err != nil {
 		log.Printf("Failed to LISTEN: %v\n", err)
 		return
@@ -47,8 +53,11 @@ func listenBlocks(pool *pgxpool.Pool, hub *Hub) {
 
 	// Block and wait for notifications
 	for {
-		notification, err := conn.Conn().WaitForNotification(context.Background())
+		notification, err := conn.Conn().WaitForNotification(ctx)
 		if err != nil {
+			if ctx.Err() != nil {
+				return // Context cancelled, exit cleanly
+			}
 			log.Printf("Error waiting for notification: %v\n", err)
 			return // Breaking out triggers the wrapper retry
 		}

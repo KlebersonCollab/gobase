@@ -59,12 +59,16 @@ func main() {
 
 	slog.Info("Successfully connected and migrated primary schemas on PostgreSQL")
 
+	// Create a global context that cancels when SIGINT is received for the app lifecycle
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
 	// Initialize Realtime Hub
 	hub := realtime.NewHub()
 	go hub.Run()
 
 	// Start Postgres event listener for realtime broadcast
-	realtime.StartListener(dbPool, hub)
+	realtime.StartListener(appCtx, dbPool, hub)
 
 	// Setup basic HTTP router
 	mux := api.NewRouterWithHub(dbPool, hub)
@@ -89,6 +93,9 @@ func main() {
 	<-quit
 
 	slog.Info("Shutting down server...")
+
+	// Signal closing to all background workers
+	appCancel()
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer shutdownCancel()

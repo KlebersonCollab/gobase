@@ -3,11 +3,13 @@ import { req } from './api';
 import { useToast } from './Toast';
 import {
     Table2, Plus, Search, ArrowRight, ArrowLeft, Columns, Rows3, FilePlus,
-    Terminal, Trash2, Pencil, Link, Unlink, RefreshCw, Table, Braces, Send, X, Shield, ShieldCheck, Settings
+    Terminal, Trash2, Pencil, Link, Unlink, RefreshCw, Table, Braces, Send, X, Shield, ShieldCheck, Settings, Layout
 } from 'lucide-react';
+import DynamicForm from './components/DynamicForm';
 
 export default function Collections() {
     const toast = useToast();
+    const SYSTEM_COLUMNS = ['id', 'created_at', 'modified_at', 'created_by', 'modified_by', 'tenant_id', 'id_key'];
     const [tables, setTables] = useState([]);
     const [current, setCurrent] = useState('');
     const [tab, setTab] = useState('schema');
@@ -63,10 +65,13 @@ export default function Collections() {
     const [filterDraft, setFilterDraft] = useState({ col: '', op: 'eq', val: '' });
 
     // Insert state
+    const [insertData, setInsertData] = useState({});
+    const [insertMode, setInsertMode] = useState('form'); // 'form' or 'json'
     const [insertJson, setInsertJson] = useState('{}');
 
     // Edit modal
     const [editRow, setEditRow] = useState(null);
+    const [editData, setEditData] = useState({});
     const [editJson, setEditJson] = useState('');
 
     // Rule modal
@@ -157,13 +162,14 @@ export default function Collections() {
         if (!current || !columns.length) return;
         const tpl = {};
         columns.forEach(c => {
-            if (['id', 'created_at', 'modified_at', 'created_by', 'modified_by', 'tenant_id'].includes(c.name)) return;
+            if (SYSTEM_COLUMNS.includes(c.name)) return;
             if (c.type === 'text' || c.type === 'character varying') tpl[c.name] = '';
             else if (c.type === 'integer' || c.type === 'bigint') tpl[c.name] = 0;
             else if (c.type === 'boolean') tpl[c.name] = false;
             else if (c.type === 'jsonb') tpl[c.name] = {};
             else tpl[c.name] = '';
         });
+        setInsertData(tpl);
         setInsertJson(JSON.stringify(tpl, null, 2));
     }, [current, columns]);
 
@@ -296,13 +302,16 @@ export default function Collections() {
 
     const commitInsert = async () => {
         let payload;
-        try { payload = JSON.parse(insertJson); } catch { return toast('Invalid JSON syntax', true); }
+        if (insertMode === 'json') {
+            try { payload = JSON.parse(insertJson); } catch { return toast('Invalid JSON syntax', true); }
+        } else {
+            payload = insertData;
+        }
+
         try {
             await req(`/api/collections/${current}`, { method: 'POST', body: payload });
             toast('Record inserted');
-            // Reset template
-            const c = await req(`/api/schema/tables/${current}/columns`);
-            setColumns(c || []);
+            loadData();
         } catch (e) { toast(e.message, true); }
     };
 
@@ -317,7 +326,12 @@ export default function Collections() {
 
     const saveEdit = async () => {
         let payload;
-        try { payload = JSON.parse(editJson); } catch { return toast('Invalid JSON', true); }
+        if (insertMode === 'json') {
+            try { payload = JSON.parse(editJson); } catch { return toast('Invalid JSON', true); }
+        } else {
+            payload = editData;
+        }
+
         try {
             await req(`/api/collections/${current}/${editRow.id}`, { method: 'PUT', body: payload });
             toast('Record updated');
@@ -457,7 +471,7 @@ export default function Collections() {
                                 </div>
                                 <div className="divide-y divide-border max-h-[360px] overflow-y-auto">
                                     {columns.map(c => {
-                                        const sys = ['id', 'created_at', 'modified_at', 'created_by', 'modified_by', 'tenant_id'].includes(c.name);
+                                        const sys = SYSTEM_COLUMNS.includes(c.name);
                                         return (
                                             <div key={c.name} className="flex items-center justify-between px-5 py-2.5 group hover:bg-surface-0/30 transition-colors">
                                                 <div className="flex items-center gap-3">
@@ -701,10 +715,12 @@ export default function Collections() {
                                                         <button onClick={() => {
                                                             setEditRow(row);
                                                             const e = { ...row };
-                                                            const sys = ['id', 'created_at', 'modified_at', 'created_by', 'modified_by', 'tenant_id'];
+                                                            const sys = ['id', 'created_at', 'modified_at', 'created_by', 'modified_by', 'tenant_id', 'id_key'];
                                                             sys.forEach(k => delete e[k]);
+                                                            setEditData(e);
                                                             setEditJson(JSON.stringify(e, null, 2));
                                                         }}
+                                                            title="Edit Record"
                                                             className="p-1 text-txt-3 hover:text-blue-400 transition-colors"><Pencil className="w-3.5 h-3.5" /></button>
                                                         <button onClick={() => deleteRecord(row.id)}
                                                             className="p-1 text-txt-3 hover:text-red-400 transition-colors"><Trash2 className="w-3.5 h-3.5" /></button>
@@ -724,10 +740,11 @@ export default function Collections() {
                                                     <button onClick={() => {
                                                         setEditRow(row);
                                                         const e = { ...row };
-                                                        const sys = ['id', 'created_at', 'modified_at', 'created_by', 'modified_by', 'tenant_id'];
-                                                        sys.forEach(k => delete e[k]);
+                                                        SYSTEM_COLUMNS.forEach(k => delete e[k]);
+                                                        setEditData(e);
                                                         setEditJson(JSON.stringify(e, null, 2));
                                                     }}
+                                                        title="Edit Record"
                                                         className="p-1 px-2 text-xs bg-surface-2 text-txt-2 hover:bg-blue-500/10 hover:text-blue-400 rounded transition-colors flex items-center gap-1.5"><Pencil className="w-3 h-3" /> Edit</button>
                                                     <button onClick={() => deleteRecord(row.id)}
                                                         className="p-1 px-2 text-xs bg-surface-2 text-txt-2 hover:bg-red-500/10 hover:text-red-400 rounded transition-colors flex items-center gap-1.5"><Trash2 className="w-3 h-3" /> Delete</button>
@@ -755,13 +772,31 @@ export default function Collections() {
                                 <h3 className="text-sm font-medium text-txt-0 flex items-center gap-2">
                                     <FilePlus className="w-4 h-4 text-brand" /> Insert Document
                                 </h3>
-                                <span className="text-xs text-txt-3 font-mono">Target: <span className="text-brand">{current}</span></span>
+                                <div className="flex bg-surface-2 rounded-md border border-border overflow-hidden">
+                                    <button onClick={() => setInsertMode('form')}
+                                        className={`px-3 py-1 text-[10px] flex items-center gap-1.5 transition-colors ${insertMode === 'form' ? 'bg-brand text-surface-0' : 'text-txt-2 hover:text-txt-0'}`}>
+                                        <Layout className="w-3 h-3" /> Form
+                                    </button>
+                                    <button onClick={() => setInsertMode('json')}
+                                        className={`px-3 py-1 text-[10px] flex items-center gap-1.5 transition-colors ${insertMode === 'json' ? 'bg-brand text-surface-0' : 'text-txt-2 hover:text-txt-0'}`}>
+                                        <Braces className="w-3 h-3" /> JSON
+                                    </button>
+                                </div>
                             </div>
                             <div className="p-5">
-                                <textarea value={insertJson} onChange={e => setInsertJson(e.target.value)} rows={14}
-                                    className="w-full px-4 py-3 bg-surface-0 border border-border rounded-md text-sm text-txt-0 font-mono focus:border-brand outline-none resize-y leading-relaxed" />
+                                {insertMode === 'form' ? (
+                                    <DynamicForm
+                                        columns={columns.filter(c => !SYSTEM_COLUMNS.includes(c.name))}
+                                        relations={relations}
+                                        value={insertData}
+                                        onChange={setInsertData}
+                                    />
+                                ) : (
+                                    <textarea value={insertJson} onChange={e => setInsertJson(e.target.value)} rows={14}
+                                        className="w-full px-4 py-3 bg-surface-0 border border-border rounded-md text-sm text-txt-0 font-mono focus:border-brand outline-none resize-y leading-relaxed" />
+                                )}
                                 <button onClick={commitInsert}
-                                    className="mt-3 w-full py-2 bg-brand text-surface-0 text-sm font-medium rounded-md hover:bg-brand-dark transition-colors flex items-center justify-center gap-2">
+                                    className="mt-6 w-full py-2.5 bg-brand text-surface-0 text-sm font-medium rounded-md hover:bg-brand-dark transition-colors flex items-center justify-center gap-2 shadow-lg shadow-brand/20">
                                     <Send className="w-4 h-4" /> Commit Record
                                 </button>
                             </div>
@@ -892,16 +927,41 @@ export default function Collections() {
             {/* Edit Modal */}
             {
                 editRow && (
-                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-                        <div className="bg-surface-1 border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl">
-                            <h3 className="text-base font-semibold text-txt-0 mb-4 flex items-center gap-2">
-                                <Pencil className="w-4 h-4 text-blue-400" /> Edit Record
-                            </h3>
-                            <textarea value={editJson} onChange={e => setEditJson(e.target.value)} rows={14}
-                                className="w-full px-4 py-3 bg-surface-0 border border-border rounded-md text-sm text-txt-0 font-mono focus:border-brand outline-none resize-y leading-relaxed mb-4" />
-                            <div className="flex gap-2 justify-end">
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 overflow-y-auto pt-10 pb-10">
+                        <div className="bg-surface-1 border border-border rounded-xl p-6 w-full max-w-lg shadow-2xl my-auto">
+                            <div className="flex items-center justify-between mb-6">
+                                <h3 className="text-base font-semibold text-txt-0 flex items-center gap-2">
+                                    <Pencil className="w-4 h-4 text-blue-400" /> Edit Record
+                                </h3>
+                                <div className="flex bg-surface-2 rounded-md border border-border overflow-hidden">
+                                    <button onClick={() => setInsertMode('form')}
+                                        className={`px-3 py-1 text-[10px] flex items-center gap-1.5 transition-colors ${insertMode === 'form' ? 'bg-brand text-surface-0' : 'text-txt-2 hover:text-txt-0'}`}>
+                                        <Layout className="w-3 h-3" /> Form
+                                    </button>
+                                    <button onClick={() => setInsertMode('json')}
+                                        className={`px-3 py-1 text-[10px] flex items-center gap-1.5 transition-colors ${insertMode === 'json' ? 'bg-brand text-surface-0' : 'text-txt-2 hover:text-txt-0'}`}>
+                                        <Braces className="w-3 h-3" /> JSON
+                                    </button>
+                                </div>
+                            </div>
+
+                            <div className="max-h-[60vh] overflow-y-auto mb-6 pr-2 custom-scrollbar">
+                                {insertMode === 'form' ? (
+                                    <DynamicForm
+                                        columns={columns.filter(c => !SYSTEM_COLUMNS.includes(c.name))}
+                                        relations={relations}
+                                        value={editData}
+                                        onChange={setEditData}
+                                    />
+                                ) : (
+                                    <textarea value={editJson} onChange={e => setEditJson(e.target.value)} rows={14}
+                                        className="w-full px-4 py-3 bg-surface-0 border border-border rounded-md text-sm text-txt-0 font-mono focus:border-brand outline-none resize-y leading-relaxed" />
+                                )}
+                            </div>
+
+                            <div className="flex gap-2 justify-end border-t border-border pt-4">
                                 <button onClick={() => setEditRow(null)} className="px-4 py-2 bg-surface-2 text-txt-1 text-sm rounded-md hover:bg-surface-3 transition-colors">Cancel</button>
-                                <button onClick={saveEdit} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors">Save Changes</button>
+                                <button onClick={saveEdit} className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors shadow-lg shadow-blue-500/20">Save Changes</button>
                             </div>
                         </div>
                     </div>
